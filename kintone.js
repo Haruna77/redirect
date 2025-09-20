@@ -2,54 +2,40 @@
   'use strict';
 
   // --- 設定値 ---
-  const lookupFieldCode = 'ルックアップ_購入商品'; 
-  const copiedProductNameFieldCode = 'copied_product_name';
-  
-  // フラグ用のフィールド
+  const lookupFieldCode = 'ルックアップ_購入商品';
   const wholesaleFlagFieldCode = 'wholesale_flag'; // 卸フラグ用
   const giftFlagFieldCode = 'gift_flag';      // Amazonギフト券フラグ用
   // --- 設定値ここまで ---
 
-  // チェックと値設定を行う共通関数
-  const checkAndUpdateFlags = (record) => {
-    // 商品名がコピーされるフィールドが存在しない場合のエラーを防止する
-    if (!record[copiedProductNameFieldCode] || typeof record[copiedProductNameFieldCode].value === 'undefined') {
-      // 処理対象のフィールドまたはその値が存在しないため、処理を中断します。
-      return;
+  kintone.events.on(['app.record.create.submit', 'app.record.edit.submit'], function(event) {
+    const record = event.record;
+
+    // ルックアップフィールドやその値が存在しない場合のエラーを防止する
+    if (!record[lookupFieldCode] || typeof record[lookupFieldCode].value === 'undefined') {
+      return event;
     }
 
-    const productName = record[copiedProductNameFieldCode].value;
+    // ルックアップフィールドの値（商品名）を取得
+    const lookupValue = record[lookupFieldCode].value;
 
     // 各フラグを一旦リセット
     record[wholesaleFlagFieldCode].value = '';
     record[giftFlagFieldCode].value = '';
 
     // 値の存在チェックと型チェック
-    if (productName && typeof productName === 'string') {
-      
+    if (lookupValue && typeof lookupValue === 'string') {
+
       // 「卸」のチェック
-      if (productName.includes('卸')) {
+      if (lookupValue.includes('卸')) {
         record[wholesaleFlagFieldCode].value = '卸';
       }
 
       // 「Amazonギフト券」のチェック
-      if (productName.includes('Amazonギフト券')) {
+      if (lookupValue.includes('Amazonギフト券')) {
         record[giftFlagFieldCode].value = 'Amazonギフトあり';
       }
     }
-  };
-
-  // イベントハンドラー
-  const events = [
-    'app.record.create.change.' + lookupFieldCode,
-    'app.record.edit.change.' + lookupFieldCode,
-    'app.record.create.submit',
-    'app.record.edit.submit'
-  ];
-
-  kintone.events.on(events, function(event) {
-    const record = event.record;
-    checkAndUpdateFlags(record);
+    
     return event;
   });
 
