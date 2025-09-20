@@ -1,30 +1,51 @@
 (function() {
   'use strict';
 
-  // レコードの新規作成画面および編集画面で、保存実行前にイベントを発生させる
-  kintone.events.on(['app.record.create.submit', 'app.record.edit.submit'], function(event) {
-    const record = event.record;
+  // --- 設定値 ---
+  const lookupFieldCode = 'ルックアップ_購入商品'; 
+  const copiedProductNameFieldCode = 'copied_product_name';
+  
+  // フラグ用のフィールド
+  const wholesaleFlagFieldCode = 'wholesale_flag'; // 卸フラグ用
+  const giftFlagFieldCode = 'gift_flag';      // Amazonギフト券フラグ用
+  // --- 設定値ここまで ---
 
-    // ルックアップフィールドの値を取得
-    const lookupValue = record['ルックアップ_購入商品'].value;
+  // チェックと値設定を行う共通関数
+  const checkAndUpdateFlags = (record) => {
+    const productName = record[copiedProductNameFieldCode].value;
+
+    // 各フラグを一旦リセット
+    record[wholesaleFlagFieldCode].value = '';
+    record[giftFlagFieldCode].value = '';
 
     // 値の存在チェックと型チェック
-    // ルックアップフィールドの値がnullやundefined、または文字列型でない場合はエラーを回避する
-    if (lookupValue && typeof lookupValue === 'string') {
-      // ルックアップフィールドの値に「卸」が含まれているか判定
-      if (lookupValue.includes('卸')) {
-        // 含まれている場合、wholesale_flagフィールドに「卸」と入力
-        record['wholesale_flag'].value = '卸';
-      } else {
-        // 含まれていない場合、wholesale_flagフィールドを空白にする
-        record['wholesale_flag'].value = '';
+    if (productName && typeof productName === 'string') {
+      
+      // 「卸」のチェック
+      if (productName.includes('卸')) {
+        record[wholesaleFlagFieldCode].value = '卸';
       }
-    } else {
-      // ルックアップフィールドが空、または予期せぬ型の場合は、wholesale_flagフィールドを空白にする
-      record['wholesale_flag'].value = '';
-    }
 
-    // イベントオブジェクトを返して、レコードの保存処理を続行する
+      // 「Amazonギフト券」のチェック
+      if (productName.includes('Amazonギフト券')) {
+        record[giftFlagFieldCode].value = 'Amazonギフトあり';
+      }
+    }
+  };
+
+  // イベントハンドラー
+  const events = [
+    'app.record.create.change.' + lookupFieldCode,
+    'app.record.edit.change.' + lookupFieldCode,
+    'app.record.create.submit',
+    'app.record.edit.submit'
+  ];
+
+  kintone.events.on(events, function(event) {
+    const record = event.record;
+    checkAndUpdateFlags(record);
     return event;
   });
+
 })();
+
