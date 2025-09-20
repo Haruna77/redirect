@@ -31,7 +31,7 @@
       }
 
       // 「Amazonギフト券」のチェック
-      if (lookupValue.includes('Amazonギフト券')) {
+      if (lookupValue.includes('Amazonギフト券あり')) {
         record[giftFlagFieldCode].value = 'Amazonギフトあり';
       }
     }
@@ -40,4 +40,5 @@
   });
 
 })();
+
 
