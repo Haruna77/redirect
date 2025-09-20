@@ -12,6 +12,12 @@
 
   // チェックと値設定を行う共通関数
   const checkAndUpdateFlags = (record) => {
+    // 商品名がコピーされるフィールドが存在しない場合のエラーを防止する
+    if (!record[copiedProductNameFieldCode] || typeof record[copiedProductNameFieldCode].value === 'undefined') {
+      // 処理対象のフィールドまたはその値が存在しないため、処理を中断します。
+      return;
+    }
+
     const productName = record[copiedProductNameFieldCode].value;
 
     // 各フラグを一旦リセット
