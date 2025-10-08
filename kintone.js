@@ -121,6 +121,18 @@
       console.log('Purchaser ID is blank. Starting new purchaser creation process...');
 
       try {
+        // ▼▼▼【デバッグ機能追加】▼▼▼
+        // 保存直前の「商品種別」フィールドの値をコンソールに出力して確認します。
+        console.log('--- Debugging 商品種別 ---');
+        const productTypeField = record['文字列__1行_商品種別'];
+        if (productTypeField) {
+          console.log('商品種別フィールドの値:', productTypeField.value);
+        } else {
+          console.log('商品種別フィールド自体が見つかりません。');
+        }
+        console.log('-------------------------');
+        // ▲▲▲【デバッグ機能ここまで】▲▲▲
+
         const newPurchaserRecord = {};
         FIELDS_TO_COPY.forEach(fieldCode => {
           if (record[fieldCode] && typeof record[fieldCode].value !== 'undefined' && record[fieldCode].value !== null) {
