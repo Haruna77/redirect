@@ -131,17 +131,21 @@
    * @returns {Promise<string>} 生成された顧客ID
    */
   const getGeneratedPurchaserId = async (recordId) => {
-    // ID生成の反映を待つため、5回までリトライ
-    for (let i = 0; i < 5; i++) {
+    // ▼▼▼ 変更点 ▼▼▼
+    // ID生成の反映を待つ時間を延長し、より安定させます。
+    const MAX_RETRIES = 10; // 最大10回まで試行
+    const RETRY_INTERVAL = 1000; // 1秒ごとに確認 (合計で最大約10秒待つ)
+
+    for (let i = 0; i < MAX_RETRIES; i++) {
       try {
-        await sleep(500); // 0.5秒待機
+        await sleep(RETRY_INTERVAL);
         const resp = await kintone.api(kintone.api.url('/k/v1/record', true), 'GET', {
           app: TARGET_APP_ID,
           id: recordId
         });
         const purchaserId = resp.record[TARGET_PURCHASER_ID_CODE].value;
         if (purchaserId) {
-          console.log(`Successfully retrieved generated ID: ${purchaserId}`);
+          console.log(`Successfully retrieved generated ID after ${i + 1} attempt(s): ${purchaserId}`);
           return purchaserId;
         }
         console.log(`Attempt ${i + 1}: Purchaser ID is not generated yet. Retrying...`);
@@ -149,6 +153,7 @@
         console.error(`Attempt ${i + 1} failed to get record. Retrying...`, e);
       }
     }
+    // ▲▲▲ 変更ここまで ▲▲▲
     throw new Error('Failed to retrieve the generated Purchaser ID from the target app.');
   };
 
