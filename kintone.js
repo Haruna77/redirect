@@ -68,14 +68,13 @@
   })();
 
 })();
-
 /**
  * @name New Purchaser Auto-Creation
  * @description
  * This script is for the "Payment Management" app (決済管理表).
  * When a new record is saved with a blank Purchaser ID, it automatically creates a new record
- * in the "Purchaser Information" app (購入者情報), copies specified fields, waits for the
- * new Purchaser ID to be generated, and writes that new ID back to the original payment record.
+ * in the "Purchaser Information" app (購入者情報) and copies specified fields.
+ * NOTE: This version does NOT write the newly generated ID back to the payment record.
  *
  * @trigger app.record.create.submit
  */
@@ -91,9 +90,7 @@
   // --- フィールドコード設定 ---
   // ★要設定: 【決済管理表】の「顧客ID」フィールドコード
   const SOURCE_PURCHASER_ID_CODE = 'purchaser_id';
-  // ★要設定: 【購入者情報】の「顧客ID」フィールドコード
-  const TARGET_PURCHASER_ID_CODE = 'purchaser_id';
-
+  
   // ★★★ここを編集★★★
   // 新規顧客作成時に【決済管理表】から【購入者情報】へコピーしたいフィールドの
   // フィールドコードを、以下のリストに追加してください。
@@ -117,45 +114,6 @@
     '文字列__1行_集客者_手入力用'
   ];
   // ===================================================================================
-
-  /**
-   * 少し待機するための関数
-   * @param {number} ms 待機するミリ秒
-   */
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-  /**
-   * 【購入者情報】アプリで自動生成された顧客IDを取得する関数
-   * IDが生成されるまで数回リトライします。
-   * @param {string} recordId 【購入者情報】に作成されたレコードのID
-   * @returns {Promise<string>} 生成された顧客ID
-   */
-  const getGeneratedPurchaserId = async (recordId) => {
-    // ▼▼▼ 変更点 ▼▼▼
-    // ID生成の反映を待つ時間を延長し、より安定させます。
-    const MAX_RETRIES = 10; // 最大10回まで試行
-    const RETRY_INTERVAL = 1000; // 1秒ごとに確認 (合計で最大約10秒待つ)
-
-    for (let i = 0; i < MAX_RETRIES; i++) {
-      try {
-        await sleep(RETRY_INTERVAL);
-        const resp = await kintone.api(kintone.api.url('/k/v1/record', true), 'GET', {
-          app: TARGET_APP_ID,
-          id: recordId
-        });
-        const purchaserId = resp.record[TARGET_PURCHASER_ID_CODE].value;
-        if (purchaserId) {
-          console.log(`Successfully retrieved generated ID after ${i + 1} attempt(s): ${purchaserId}`);
-          return purchaserId;
-        }
-        console.log(`Attempt ${i + 1}: Purchaser ID is not generated yet. Retrying...`);
-      } catch (e) {
-        console.error(`Attempt ${i + 1} failed to get record. Retrying...`, e);
-      }
-    }
-    // ▲▲▲ 変更ここまで ▲▲▲
-    throw new Error('Failed to retrieve the generated Purchaser ID from the target app.');
-  };
 
   // レコード新規保存"前"のイベント
   kintone.events.on('app.record.create.submit', async (event) => {
@@ -187,15 +145,12 @@
         app: TARGET_APP_ID,
         record: newPurchaserRecord
       });
-      const newRecordId = postResp.id;
-      console.log(`Created new preliminary purchaser record in App ${TARGET_APP_ID} with Record ID: ${newRecordId}`);
+      
+      console.log(`Created new purchaser record in App ${TARGET_APP_ID} with Record ID: ${postResp.id}`);
 
-      // --- 3. 【購入者情報】で自動生成された新しい顧客IDを取得する ---
-      const newPurchaserId = await getGeneratedPurchaserId(newRecordId);
-
-      // --- 4. 取得したIDを、今まさに保存しようとしている【決済管理表】のレコードに書き戻す ---
-      record[SOURCE_PURCHASER_ID_CODE].value = newPurchaserId;
-      console.log(`New Purchaser ID ${newPurchaserId} has been set to the current record.`);
+      // ▼▼▼ 変更点 ▼▼▼
+      // IDの取得と書き戻し処理を削除しました。
+      // ▲▲▲ 変更ここまで ▲▲▲
 
     } catch (error) {
       console.error('Error during new purchaser auto-creation process:', error);
