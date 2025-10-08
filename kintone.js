@@ -3,7 +3,8 @@
  * This script combines three functions:
  * 1. Sets flags based on the purchased product.
  * 2. Copies address details based on a checkbox.
- * 3. Automatically creates a new purchaser record if the purchaser ID is blank.
+ * 3. Automatically creates a new purchaser record if the purchaser ID is blank,
+ * generates a new ID, updates the new record with that ID, and writes it back.
  */
 (function() {
   'use strict';
@@ -74,9 +75,9 @@
     });
   })();
 
-  // --- 機能3: 新規顧客の自動登録 --------------------------------------
+  // --- 機能3: 新規顧客の自動登録とID生成 --------------------------------------
   /**
-   * @name New Purchaser Auto-Creation
+   * @name New Purchaser Auto-Creation & ID Generation
    */
   (function() {
     // ===================================================================================
@@ -84,7 +85,12 @@
     // ===================================================================================
     const TARGET_APP_ID = 26;
     const SOURCE_PURCHASER_ID_CODE = 'purchaser_id';
-    
+    const TARGET_PURCHASER_ID_CODE = 'purchaser_id';
+
+    // --- ID生成ルール (【購入者情報】の customer-id-generator.js と設定を合わせる) ---
+    const ID_PREFIX = 'C-';
+    const PADDING_LENGTH = 7;
+
     const FIELDS_TO_COPY = [
       '生徒名_苗字',
       '生徒名_名前',
@@ -123,14 +129,34 @@
             };
           }
         });
-        console.log('Data to be copied:', newPurchaserRecord);
 
+        // 1. 【購入者情報】に新しいレコードを追加する
         const postResp = await kintone.api(kintone.api.url('/k/v1/record', true), 'POST', {
           app: TARGET_APP_ID,
           record: newPurchaserRecord
         });
-        
-        console.log(`Created new purchaser record in App ${TARGET_APP_ID} with Record ID: ${postResp.id}`);
+        const newRecordId = postResp.id;
+        console.log(`Created new purchaser record in App ${TARGET_APP_ID} with Record ID: ${newRecordId}`);
+
+        // 2. 取得したレコード番号を元に、新しい顧客IDをこのスクリプト内で生成する
+        const newPurchaserId = ID_PREFIX + String(newRecordId).padStart(PADDING_LENGTH, '0');
+        console.log(`Generated new Purchaser ID: ${newPurchaserId}`);
+
+        // 3. 生成したIDで、【購入者情報】の今作ったレコードを更新する
+        await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
+          app: TARGET_APP_ID,
+          id: newRecordId,
+          record: {
+            [TARGET_PURCHASER_ID_CODE]: {
+              value: newPurchaserId
+            }
+          }
+        });
+        console.log(`Successfully updated the new purchaser record with the generated ID.`);
+
+        // 4. 生成したIDを、【決済管理表】のレコードにも書き戻す
+        record[SOURCE_PURCHASER_ID_CODE].value = newPurchaserId;
+        console.log(`New Purchaser ID has been set to the current record.`);
 
       } catch (error) {
         console.error('Error during new purchaser auto-creation process:', error);
