@@ -5,6 +5,7 @@
  * 2. Copies address details based on a checkbox.
  * 3. Automatically creates a new purchaser record if the purchaser ID is blank,
  * generates a new ID, updates the new record with that ID, and writes it back.
+ * This version supports copying data into a table in the target app.
  */
 (function() {
   'use strict';
@@ -91,6 +92,11 @@
     const ID_PREFIX = 'C-';
     const PADDING_LENGTH = 7;
 
+    // ▼▼▼ 変更点 ▼▼▼
+    // ★要設定：【購入者情報】にあるテーブル自体のフィールドコード
+    const TARGET_TABLE_CODE = 'テーブル_決済管理表の情報_購入履歴';
+
+    // テーブルの外にあるフィールドをコピーするためのリスト
     const FIELDS_TO_COPY = [
       '生徒名_苗字',
       '生徒名_名前',
@@ -100,14 +106,22 @@
       '郵便番号_生徒住所',
       '住所_生徒住所_0',
       '生徒LINE名',
-      '全額決済完了日',
-      '決済残高',
-      '文字列__1行_商品種別',
-      'ドロップダウン_解約理由',
       '文字列__1行_登録経路_手入力用',
       '文字列__1行_集客媒体_報酬ランク',
       '文字列__1行_集客者_手入力用'
     ];
+
+    // テーブルの中にコピーするためのリスト
+    // ※注意：コピー先のフィールドの種類は、ルックアップではなく「文字列(1行)」などである必要があります。
+    const FIELDS_TO_COPY_INTO_TABLE = [
+      '全額決済完了日',
+      '決済残高',
+      '文字列__1行_商品種別',
+      'ドロップダウン_解約理由',
+      'ルックアップ_購入商品',
+      'クローザー_ルックアップ'
+    ];
+    // ▲▲▲ 変更ここまで ▲▲▲
     // ===================================================================================
 
     kintone.events.on('app.record.create.submit', async (event) => {
@@ -121,18 +135,7 @@
       console.log('Purchaser ID is blank. Starting new purchaser creation process...');
 
       try {
-        // ▼▼▼【デバッグ機能追加】▼▼▼
-        // 保存直前の「商品種別」フィールドの値をコンソールに出力して確認します。
-        console.log('--- Debugging 商品種別 ---');
-        const productTypeField = record['文字列__1行_商品種別'];
-        if (productTypeField) {
-          console.log('商品種別フィールドの値:', productTypeField.value);
-        } else {
-          console.log('商品種別フィールド自体が見つかりません。');
-        }
-        console.log('-------------------------');
-        // ▲▲▲【デバッグ機能ここまで】▲▲▲
-
+        // --- メインフィールド用のデータを作成 ---
         const newPurchaserRecord = {};
         FIELDS_TO_COPY.forEach(fieldCode => {
           if (record[fieldCode] && typeof record[fieldCode].value !== 'undefined' && record[fieldCode].value !== null) {
@@ -141,6 +144,29 @@
             };
           }
         });
+
+        // --- テーブル用のデータを作成 ---
+        const tableRowValue = {};
+        FIELDS_TO_COPY_INTO_TABLE.forEach(fieldCode => {
+            if (record[fieldCode] && typeof record[fieldCode].value !== 'undefined' && record[fieldCode].value !== null) {
+                // テーブル内のフィールドコードと、コピー元のフィールドコードが同じと仮定
+                tableRowValue[fieldCode] = {
+                    value: record[fieldCode].value
+                };
+            }
+        });
+
+        // テーブルに書き込むデータがある場合のみ、テーブルデータを追加
+        if (Object.keys(tableRowValue).length > 0) {
+            newPurchaserRecord[TARGET_TABLE_CODE] = {
+                value: [ // テーブルは行の配列
+                    {
+                        value: tableRowValue // 1行分のデータ
+                    }
+                ]
+            };
+        }
+        console.log('Data to be copied:', newPurchaserRecord);
 
         // 1. 【購入者情報】に新しいレコードを追加する
         const postResp = await kintone.api(kintone.api.url('/k/v1/record', true), 'POST', {
