@@ -87,15 +87,25 @@
     const PADDING_LENGTH = 7;
     const TARGET_TABLE_CODE = 'テーブル_決済管理表の情報_購入履歴';
 
+    // ▼▼▼ 変更点 ▼▼▼
+    // テーブルの外にあるフィールドをコピーするためのリスト
     const FIELDS_TO_COPY = [
       '生徒名_苗字', '生徒名_名前', 'メールアドレス', 'phone', '名前_生徒住所',
       '郵便番号_生徒住所', '住所_生徒住所_0', '生徒LINE名', '文字列__1行_登録経路_手入力用',
-      '文字列__1行_集客媒体_報酬ランク', '文字列__1行_集客者_手入力用'
+      '文字列__1行_集客媒体_報酬ランク', '文字列__1行_集客者_手入力用',
+      '集客者_ルックアップ',
+      'ルックアップ_導線タイプ',
+      'ルックアップ_登録経路_自社広告・自社SNS',
+      'ルックアップ_集客媒体_集客者の報酬ランク',
+      'ルックアップ_登録経路_集客者から選択'
     ];
+    // テーブルの中にコピーするためのリスト
     const FIELDS_TO_COPY_INTO_TABLE = [
       '全額決済完了日', '決済残高', '文字列__1行_商品種別', 'ドロップダウン_解約理由',
-      'ルックアップ_購入商品', 'クローザー_ルックアップ'
+      'ルックアップ_購入商品', 'クローザー_ルックアップ',
+      'ドロップダウン_ONE入会有無'
     ];
+    // ▲▲▲ 変更ここまで ▲▲▲
 
     kintone.events.on('app.record.create.submit', async (event) => {
       const record = event.record;
@@ -145,11 +155,8 @@
     const TARGET_CREATED_TIME_CODE = '作成日時';
 
     kintone.events.on('app.record.create.submit.success', async (event) => {
-      // ▼▼▼【デバッグ機能追加】▼▼▼
       console.log('機能4: submit.success イベントが発火しました。');
-      // ▲▲▲【デバッグ機能ここまで】▲▲▲
 
-      // 機能3で情報が保存されていた場合のみ実行
       if (!newPurchaserInfo) {
         console.log('機能4: 新規顧客情報がないため、処理をスキップします。');
         return event;
@@ -180,13 +187,14 @@
 
         if (targetTable.length > 0) {
           const firstRow = targetTable[0];
-          const updateDataValue = { ...firstRow.value }; // 既存の値をコピー
+          const updateDataValue = { ...firstRow.value };
 
-          // 新しい情報を追加または上書き
-          updateDataValue[TARGET_RECORD_NO_CODE] = { value: record.$id.value }; 
+          // レコード番号を「数値」に変換して、型の不一致を防ぎます。
+          updateDataValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
+           
           updateDataValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
 
-          console.log('機能4: 追記するデータ:', {recordNo: record.$id.value, createdTime: record.作成日時.value});
+          console.log('機能4: 追記するデータ:', {recordNo: Number(record.$id.value), createdTime: record.作成日時.value});
 
           await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
             app: TARGET_APP_ID,
