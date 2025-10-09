@@ -145,6 +145,10 @@
     const TARGET_CREATED_TIME_CODE = '作成日時';
 
     kintone.events.on('app.record.create.submit.success', async (event) => {
+      // ▼▼▼【デバッグ機能追加】▼▼▼
+      console.log('機能4: submit.success イベントが発火しました。');
+      // ▲▲▲【デバッグ機能ここまで】▲▲▲
+
       // 機能3で情報が保存されていた場合のみ実行
       if (!newPurchaserInfo) {
         console.log('機能4: 新規顧客情報がないため、処理をスキップします。');
