@@ -49,7 +49,7 @@
     const sourceName        = '名前_生徒住所';
     const sourceAddress     = '住所_生徒住所_0';
     const destPostalCode    = '郵便番号_郵送先';
-    const destName          = '宛名_郵- D郵送先';
+    const destName          = '宛名_郵送先';
     const destAddress       = '住所_郵送先';
     // --- 設定値ここまで ---
 
