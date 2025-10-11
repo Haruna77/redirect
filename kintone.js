@@ -1,6 +1,7 @@
 /**
  * Kintone Customization Script for 決済管理表
  * This script combines multiple functions including purchaser creation and all automations.
+ * It now also handles adding purchase history for existing customers.
  */
 (function() {
   'use strict';
@@ -85,15 +86,6 @@
         FIELDS_TO_COPY.forEach(fc => {
           if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') newPurchaserRecord[fc] = { value: record[fc].value };
         });
-
-        // ▼▼▼【機能追加】▼▼▼
-        // 自動入力フィールドのロジックをここに追加
-        // 1. 「ONE生徒」の自動入力
-        const productTypeFieldCode = '文字列__1行_商品種別';
-        if (record[productTypeFieldCode] && record[productTypeFieldCode].value && record[productTypeFieldCode].value.includes('バックエンド')) {
-          newPurchaserRecord['自動入力_ONE入会有無'] = { value: 'ONE生徒' };
-        }
-        // 2. 「集客者」の自動入力
         const referrerPriority = ['集客者_ルックアップ', 'ルックアップ_登録経路_自社広告・自社SNS', '文字列__1行_登録経路_手入力用'];
         for (const fieldCode of referrerPriority) {
           if (record[fieldCode] && record[fieldCode].value) {
@@ -101,7 +93,6 @@
             break;
           }
         }
-        // 3. 「集客媒体」の自動入力
         const mediaPriority = ['報酬ランク_集客', 'ルックアップ_集客媒体_集客者の報酬ランク'];
         for (const fieldCode of mediaPriority) {
           if (record[fieldCode] && record[fieldCode].value) {
@@ -109,8 +100,10 @@
             break;
           }
         }
-        // ▲▲▲【機能追加ここまで】▲▲▲
-
+        const productTypeFieldCode = '文字列__1行_商品種別';
+        if (record[productTypeFieldCode] && record[productTypeFieldCode].value && record[productTypeFieldCode].value.includes('バックエンド')) {
+          newPurchaserRecord['自動入力_ONE入会有無'] = { value: 'ONE生徒' };
+        }
         const tableRowValue = {};
         FIELDS_TO_COPY_INTO_TABLE.forEach(fc => {
           if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') tableRowValue[fc] = { value: record[fc].value };
@@ -118,14 +111,12 @@
         if (Object.keys(tableRowValue).length > 0) {
           newPurchaserRecord[TARGET_TABLE_CODE] = { value: [{ value: tableRowValue }] };
         }
-
         const postResp = await kintone.api(kintone.api.url('/k/v1/record', true), 'POST', { app: TARGET_APP_ID, record: newPurchaserRecord });
         const newRecordId = postResp.id;
         const newPurchaserId = ID_PREFIX + String(newRecordId).padStart(PADDING_LENGTH, '0');
-
         await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', { app: TARGET_APP_ID, id: newRecordId, record: { [TARGET_PURCHASER_ID_CODE]: { value: newPurchaserId } } });
         record[SOURCE_PURCHASER_ID_CODE].value = newPurchaserId;
-        newPurchaserInfo = { purchaserId: newPurchaserId };
+        newPurchaserInfo = { purchaserId: newPurchaserId, isNew: true };
         console.log(`機能3: New Purchaser ID ${newPurchaserId} has been set.`);
       } catch (error) {
         console.error('機能3 Error:', error);
@@ -136,55 +127,91 @@
     });
   })();
 
-  // --- 機能4: 保存後の情報追記 (レコード番号と作成日時) ---------------------
+  // --- 機能4 & 5: 保存後の情報更新（新規・既存両対応） ---------------------
   (function() {
     const TARGET_APP_ID = 26;
+    const SOURCE_PURCHASER_ID_CODE = 'purchaser_id';
     const TARGET_PURCHASER_ID_CODE = 'purchaser_id';
     const TARGET_TABLE_CODE = 'テーブル_決済管理表の情報_購入履歴';
     const TARGET_RECORD_NO_CODE = 'レコード番号';
     const TARGET_CREATED_TIME_CODE = '作成日時';
 
+    // 動作2: 基本情報の更新対象フィールド
+    const FIELDS_TO_UPDATE = [
+      'メールアドレス', 'phone', '名前_生徒住所',
+      '郵便番号_生徒住所', '住所_生徒住所_0', '生徒LINE名'
+    ];
+    // 動作1: テーブルに追加する購入情報のフィールド
+    const FIELDS_FOR_NEW_ROW = [
+       'ルックアップ_購入商品', '数値_商品単価', '全額決済完了日', '決済残高',
+       'クローザー_ルックアップ', '文字列__1行_商品種別', 'ドロップダウン_解約理由', 'ドロップダウン_ONE入会有無'
+    ];
+
     kintone.events.on('app.record.create.submit.success', async (event) => {
-      console.log('機能4: submit.success イベントが発火しました。');
-      if (!newPurchaserInfo) {
-        console.log('機能4: 新規顧客情報がないため、処理をスキップします。');
-        return event;
-      }
       const record = event.record;
-      const purchaserId = newPurchaserInfo.purchaserId;
-      newPurchaserInfo = null;
-      console.log(`機能4: Starting final info update for new purchaser ID: ${purchaserId}`);
-      try {
-        const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', {
-          app: TARGET_APP_ID,
-          query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"`,
-          fields: ['$id', TARGET_TABLE_CODE]
-        });
-        if (getResp.records.length === 0) {
-          console.error(`機能4 Error: Could not find purchaser record with ID ${purchaserId}`);
-          return event;
-        }
-        const targetRecord = getResp.records[0];
-        const targetRecordId = targetRecord.$id.value;
-        const targetTable = targetRecord[TARGET_TABLE_CODE].value;
-        if (targetTable.length > 0) {
-          const firstRow = targetTable[0];
-          const updateDataValue = { ...firstRow.value };
-          updateDataValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
-          updateDataValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
-          await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
-            app: TARGET_APP_ID,
-            id: targetRecordId,
-            record: {
-              [TARGET_TABLE_CODE]: {
-                value: [{ id: firstRow.id, value: updateDataValue }]
-              }
-            }
+      const purchaserId = record[SOURCE_PURCHASER_ID_CODE].value;
+
+      if (!purchaserId) return event; // 顧客IDがなければ何もしない
+
+      // ----- 新規顧客の場合の処理 -----
+      if (newPurchaserInfo && newPurchaserInfo.isNew && newPurchaserInfo.purchaserId === purchaserId) {
+        console.log(`機能4: Starting final info update for NEW purchaser ID: ${purchaserId}`);
+        newPurchaserInfo = null; // フラグをクリア
+        try {
+          const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', { app: TARGET_APP_ID, query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"`, fields: ['$id', TARGET_TABLE_CODE] });
+          if (getResp.records.length === 0) return event;
+          const targetRecordId = getResp.records[0].$id.value;
+          const targetTable = getResp.records[0][TARGET_TABLE_CODE].value;
+          if (targetTable.length > 0) {
+            const firstRow = targetTable[0];
+            const updateDataValue = { ...firstRow.value };
+            updateDataValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
+            updateDataValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
+            await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', { app: TARGET_APP_ID, id: targetRecordId, record: { [TARGET_TABLE_CODE]: { value: [{ id: firstRow.id, value: updateDataValue }] } } });
+            console.log(`機能4: Successfully updated new purchaser record ${targetRecordId} with final info.`);
+          }
+        } catch (error) { console.error('機能4 Error:', error); }
+
+      // ----- 既存顧客の場合の処理 -----
+      } else {
+        console.log(`機能5: Starting purchase history update for EXISTING purchaser ID: ${purchaserId}`);
+        try {
+          // 1. purchaserId を元に、【購入者情報】の既存レコードを取得する
+          const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', { app: TARGET_APP_ID, query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"` });
+          if (getResp.records.length === 0) {
+            console.error(`機能5 Error: Could not find purchaser record with ID ${purchaserId}`);
+            return event;
+          }
+          const targetRecord = getResp.records[0];
+          const targetRecordId = targetRecord.$id.value;
+          
+          // 2. 更新用データを作成 (基本情報の上書き)
+          const recordForUpdate = {};
+          FIELDS_TO_UPDATE.forEach(fc => {
+            if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') recordForUpdate[fc] = { value: record[fc].value };
           });
-          console.log(`機能4: Successfully updated purchaser record ${targetRecordId} with final info.`);
+
+          // 3. テーブルに追加する新しい行データを作成
+          const newRowValue = {};
+          FIELDS_FOR_NEW_ROW.forEach(fc => {
+            if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') newRowValue[fc] = { value: record[fc].value };
+          });
+          // レコード番号と作成日時も新しい行に追加
+          newRowValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
+          newRowValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
+
+          // 4. 既存のテーブルに新しい行を追加
+          const existingTable = targetRecord[TARGET_TABLE_CODE].value;
+          existingTable.push({ value: newRowValue });
+          recordForUpdate[TARGET_TABLE_CODE] = { value: existingTable };
+
+          // 5. 【購入者情報】のレコードを更新
+          await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', { app: TARGET_APP_ID, id: targetRecordId, record: recordForUpdate });
+          console.log(`機能5: Successfully added new purchase history to purchaser record ${targetRecordId}.`);
+        } catch (error) {
+          console.error('機能5 Error:', error);
+          // ここでは画面にエラーを表示しない
         }
-      } catch (error) {
-        console.error('機能4 Error:', error);
       }
       return event;
     });
