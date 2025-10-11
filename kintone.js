@@ -1,7 +1,7 @@
 /**
  * Kintone Customization Script for 決済管理表
- * This script combines multiple functions including purchaser creation and all automations.
- * It now also handles adding purchase history for existing customers.
+ * This script combines multiple functions including purchaser creation, automations,
+ * and updating existing purchaser records on both record creation and edit.
  */
 (function() {
   'use strict';
@@ -63,19 +63,16 @@
     const PADDING_LENGTH = 7;
     const TARGET_TABLE_CODE = 'テーブル_決済管理表の情報_購入履歴';
 
-    // テーブルの外にあるフィールドをコピーするためのリスト
     const FIELDS_TO_COPY = [
       '生徒名_苗字', '生徒名_名前', 'メールアドレス', 'phone', '名前_生徒住所',
       '郵便番号_生徒住所', '住所_生徒住所_0', '生徒LINE名', '文字列__1行_登録経路_手入力用',
       '文字列__1行_集客媒体_報酬ランク', '文字列__1行_集客者_手入力用', '集客者_ルックアップ',
       'ルックアップ_導線タイプ', 'ルックアップ_登録経路_自社広告・自社SNS', 'ルックアップ_集客媒体_集客者の報酬ランク',
-      'ルックアップ_登録経路_集客者から選択', '報酬ランク_集客'
+      'ルックアップ_登録経路_集客者から選択', '報酬ランク_集客', '文字列_複数行_備考'
     ];
-    // テーブルの中にコピーするためのリスト
     const FIELDS_TO_COPY_INTO_TABLE = [
       '全額決済完了日', '決済残高', '文字列__1行_商品種別', 'ドロップダウン_解約理由',
-      'ルックアップ_購入商品', 'クローザー_ルックアップ', 'ドロップダウン_ONE入会有無', '数値_商品単価',
-      '文字列_複数行_備考' // ←★こちらに移動しました
+      'ルックアップ_購入商品', 'クローザー_ルックアップ', 'ドロップダウン_ONE入会有無', '数値_商品単価'
     ];
 
     kintone.events.on('app.record.create.submit', async (event) => {
@@ -139,12 +136,10 @@
     const TARGET_RECORD_NO_CODE = 'レコード番号';
     const TARGET_CREATED_TIME_CODE = '作成日時';
 
-    // 動作2: 基本情報の更新対象フィールド
     const FIELDS_TO_UPDATE = [
       'メールアドレス', 'phone', '名前_生徒住所',
       '郵便番号_生徒住所', '住所_生徒住所_0', '生徒LINE名'
     ];
-    // 動作1: テーブルに追加する購入情報のフィールド
     const FIELDS_FOR_NEW_ROW = [
        'ルックアップ_購入商品', '数値_商品単価', '全額決済完了日', '決済残高',
        'クローザー_ルックアップ', '文字列__1行_商品種別', 'ドロップダウン_解約理由', 'ドロップダウン_ONE入会有無',
@@ -155,12 +150,11 @@
       const record = event.record;
       const purchaserId = record[SOURCE_PURCHASER_ID_CODE].value;
 
-      if (!purchaserId) return event; // 顧客IDがなければ何もしない
+      if (!purchaserId) return event;
 
-      // ----- 新規顧客の場合の処理 -----
       if (newPurchaserInfo && newPurchaserInfo.isNew && newPurchaserInfo.purchaserId === purchaserId) {
         console.log(`機能4: Starting final info update for NEW purchaser ID: ${purchaserId}`);
-        newPurchaserInfo = null; // フラグをクリア
+        newPurchaserInfo = null;
         try {
           const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', { app: TARGET_APP_ID, query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"`, fields: ['$id', TARGET_TABLE_CODE] });
           if (getResp.records.length === 0) return event;
@@ -176,11 +170,9 @@
           }
         } catch (error) { console.error('機能4 Error:', error); }
 
-      // ----- 既存顧客の場合の処理 -----
       } else {
         console.log(`機能5: Starting purchase history update for EXISTING purchaser ID: ${purchaserId}`);
         try {
-          // 1. purchaserId を元に、【購入者情報】の既存レコードを取得する
           const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', { app: TARGET_APP_ID, query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"` });
           if (getResp.records.length === 0) {
             console.error(`機能5 Error: Could not find purchaser record with ID ${purchaserId}`);
@@ -188,34 +180,102 @@
           }
           const targetRecord = getResp.records[0];
           const targetRecordId = targetRecord.$id.value;
-          
-          // 2. 更新用データを作成 (基本情報の上書き)
           const recordForUpdate = {};
           FIELDS_TO_UPDATE.forEach(fc => {
             if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') recordForUpdate[fc] = { value: record[fc].value };
           });
-
-          // 3. テーブルに追加する新しい行データを作成
           const newRowValue = {};
           FIELDS_FOR_NEW_ROW.forEach(fc => {
             if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') newRowValue[fc] = { value: record[fc].value };
           });
-          // レコード番号と作成日時も新しい行に追加
           newRowValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
           newRowValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
-
-          // 4. 既存のテーブルに新しい行を追加
           const existingTable = targetRecord[TARGET_TABLE_CODE].value;
           existingTable.push({ value: newRowValue });
           recordForUpdate[TARGET_TABLE_CODE] = { value: existingTable };
-
-          // 5. 【購入者情報】のレコードを更新
           await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', { app: TARGET_APP_ID, id: targetRecordId, record: recordForUpdate });
           console.log(`機能5: Successfully added new purchase history to purchaser record ${targetRecordId}.`);
         } catch (error) {
           console.error('機能5 Error:', error);
-          // ここでは画面にエラーを表示しない
         }
+      }
+      return event;
+    });
+  })();
+
+  // --- 機能6: 既存レコード編集時の情報更新 -----------------------------------
+  (function() {
+    const TARGET_APP_ID = 26;
+    const SOURCE_PURCHASER_ID_CODE = 'purchaser_id';
+    const TARGET_PURCHASER_ID_CODE = 'purchaser_id';
+    const TARGET_TABLE_CODE = 'テーブル_決済管理表の情報_購入履歴';
+    const SOURCE_RECORD_NO_FIELD_IN_TABLE = 'レコード番号'; // テーブル内のレコード番号フィールド
+
+    const FIELDS_TO_UPDATE_ON_EDIT = [
+      '生徒名_苗字', '生徒名_名前', 'メールアドレス', 'phone', '名前_生徒住所',
+      '郵便番号_生徒住所', '住所_生徒住所_0', '生徒LINE名', '集客者_ルックアップ',
+      'ルックアップ_導線タイプ', '報酬ランク_集客', 'ルックアップ_登録経路_自社広告・自社SNS',
+      'ルックアップ_集客媒体_集客者の報酬ランク', '文字列__1行_登録経路_手入力用'
+    ];
+    const FIELDS_TO_UPDATE_IN_TABLE_ON_EDIT = [
+      'ルックアップ_購入商品', '数値_商品単価', '全額決済完了日', '決済残高',
+      'クローザー_ルックアップ', '文字列__1行_商品種別', 'ドロップダウン_解約理由',
+      'ドロップダウン_ONE入会有無', '文字列_複数行_備考'
+    ];
+
+    kintone.events.on('app.record.edit.submit.success', async (event) => {
+      const record = event.record;
+      const purchaserId = record[SOURCE_PURCHASER_ID_CODE].value;
+      const sourceRecordId = Number(record.$id.value);
+
+      if (!purchaserId) return event;
+
+      console.log(`機能6: Starting update for edited record. Purchaser ID: ${purchaserId}, Source Record ID: ${sourceRecordId}`);
+
+      try {
+        const getResp = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', { app: TARGET_APP_ID, query: `${TARGET_PURCHASER_ID_CODE} = "${purchaserId}"` });
+        if (getResp.records.length === 0) {
+          console.error(`機能6 Error: Could not find purchaser record with ID ${purchaserId}`);
+          return event;
+        }
+        const targetRecord = getResp.records[0];
+        const targetRecordId = targetRecord.$id.value;
+
+        const recordForUpdate = {};
+        FIELDS_TO_UPDATE_ON_EDIT.forEach(fc => {
+          if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') recordForUpdate[fc] = { value: record[fc].value };
+        });
+
+        const table = targetRecord[TARGET_TABLE_CODE].value;
+        let rowIndex = -1;
+        for (let i = 0; i < table.length; i++) {
+          const rowRecordNo = table[i].value[SOURCE_RECORD_NO_FIELD_IN_TABLE].value;
+          if (Number(rowRecordNo) === sourceRecordId) {
+            rowIndex = i;
+            break;
+          }
+        }
+
+        if (rowIndex !== -1) {
+          const updatedRowValue = { ...table[rowIndex].value };
+          FIELDS_TO_UPDATE_IN_TABLE_ON_EDIT.forEach(fc => {
+            if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') updatedRowValue[fc] = { value: record[fc].value };
+          });
+          table[rowIndex].value = updatedRowValue;
+          recordForUpdate[TARGET_TABLE_CODE] = { value: table };
+        } else {
+          console.log(`機能6: Could not find matching row in table for record ID ${sourceRecordId}. Table will not be updated.`);
+        }
+
+        if (Object.keys(recordForUpdate).length > 0) {
+          await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', { app: TARGET_APP_ID, id: targetRecordId, record: recordForUpdate });
+          console.log(`機能6: Successfully updated purchaser record ${targetRecordId}.`);
+        } else {
+          console.log('機能6: No fields to update.');
+        }
+
+      } catch (error) {
+        console.error('機能6 Error:', error);
       }
       return event;
     });
