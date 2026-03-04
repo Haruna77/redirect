@@ -12,6 +12,7 @@
     const lookupFieldCode = 'ルックアップ_購入商品';
     const wholesaleFlagFieldCode = 'wholesale_flag';
     const giftFlagFieldCode = 'gift_flag';
+    const sevenDaysFlagFieldCode = 'flag_7days';
 
     kintone.events.on(['app.record.create.submit', 'app.record.edit.submit'], function(event) {
       const record = event.record;
@@ -19,8 +20,10 @@
       const lookupValue = record[lookupFieldCode].value;
       record[wholesaleFlagFieldCode].value = '';
       record[giftFlagFieldCode].value = '';
+      record[sevenDaysFlagFieldCode].value = '';
       if (lookupValue.includes('卸')) record[wholesaleFlagFieldCode].value = '卸';
       if (lookupValue.includes('Amazonギフト券あり')) record[giftFlagFieldCode].value = 'Amazonギフトあり';
+      if (lookupValue.includes('7days')) record[sevenDaysFlagFieldCode].value = '7days';
       return event;
     });
   })();
