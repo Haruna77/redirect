@@ -113,6 +113,10 @@
         FIELDS_TO_COPY_INTO_TABLE.forEach(fc => {
           if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') tableRowValue[fc] = { value: record[fc].value };
         });
+        // 契約書送付日: App 29「契約書送付日」→ App 26サブテーブル「日付_契約書送付日」
+        if (record['契約書送付日'] && record['契約書送付日'].value) {
+          tableRowValue['日付_契約書送付日'] = { value: record['契約書送付日'].value };
+        }
         if (Object.keys(tableRowValue).length > 0) {
           newPurchaserRecord[TARGET_TABLE_CODE] = { value: [{ value: tableRowValue }] };
         }
@@ -189,6 +193,10 @@
           FIELDS_FOR_NEW_ROW.forEach(fc => {
             if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') newRowValue[fc] = { value: record[fc].value };
           });
+          // 契約書送付日: App 29「契約書送付日」→ App 26サブテーブル「日付_契約書送付日」
+          if (record['契約書送付日'] && record['契約書送付日'].value) {
+            newRowValue['日付_契約書送付日'] = { value: record['契約書送付日'].value };
+          }
           newRowValue[TARGET_RECORD_NO_CODE] = { value: Number(record.$id.value) };
           newRowValue[TARGET_CREATED_TIME_CODE] = { value: record.作成日時.value };
           const existingTable = targetRecord[TARGET_TABLE_CODE].value;
@@ -251,6 +259,10 @@
           FIELDS_TO_UPDATE_IN_TABLE_ON_EDIT.forEach(fc => {
             if (record[fc] && record[fc].value !== null && typeof record[fc].value !== 'undefined') updatedRowValue[fc] = { value: record[fc].value };
           });
+          // 契約書送付日: App 29「契約書送付日」→ App 26サブテーブル「日付_契約書送付日」
+          if (record['契約書送付日'] && record['契約書送付日'].value !== null && typeof record['契約書送付日'].value !== 'undefined') {
+            updatedRowValue['日付_契約書送付日'] = { value: record['契約書送付日'].value };
+          }
           table[rowIndex].value = updatedRowValue;
           recordForUpdate[TARGET_TABLE_CODE] = { value: table };
         }
