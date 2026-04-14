@@ -5,6 +5,10 @@
  * 集客者×請求先で集計し、App 44を洗い替えする。
  * 「集客者請求書作成」ボタンで App 36 にレコードを一括作成する。
  *
+ * なまいきスクール生対応（2026-03以降）:
+ *   報酬ランク_集客に"なまいきスクール生"を含み、ONE入会有無="未入会"の場合、
+ *   個別集客者ではなく「株式会社リード（なまいきくん）」として請求先ごとに1枚にまとめる。
+ *
  * 必要なAPIトークン権限（APIトークン認証の場合）:
  *   App 44: レコード閲覧・追加・編集・削除
  *   App 29: レコード閲覧
@@ -35,6 +39,20 @@
     '株式会社AI ONE': '🟦AI',
     '株式会社物販ONE': '🟩物販'
   };
+
+  // ── なまいきスクール生 まとめ設定 ─────────────────────────
+  var NAMAIKI_COLLECTOR = '株式会社リード（なまいきくん）';
+  var NAMAIKI_CUTOFF = '2026-03-01'; // この日以降の全額決済完了日が対象
+
+  /**
+   * なまいきスクール生→なまいきくん払い出し対象か判定
+   * 条件: 報酬ランク_集客に"なまいきスクール生"を含む AND ONE入会有無="未入会"
+   */
+  function isNamaikiPayout(record) {
+    var rank = ((record['報酬ランク_集客'] || {}).value || '');
+    var oneStatus = ((record['文字列__1行_ONE入会有無_0'] || {}).value || '');
+    return rank.indexOf('なまいきスクール生') >= 0 && oneStatus === '未入会';
+  }
 
   // ── ユーティリティ ────────────────────────────────────────
   function getPreviousMonth() {
@@ -148,7 +166,10 @@
       ' and 全額決済完了日 < "' + cutoff + '"' +
       ' and 請求済_集客者フィー全額 not in ("請求済（集客者フィー全額）")' +
       ' and 計算_集客フィー税抜 > "0"';
-    var fields = ['集客者_ルックアップ', 'ドロップダウン_商品の種類'];
+    var fields = [
+      '集客者_ルックアップ', 'ドロップダウン_商品の種類',
+      '報酬ランク_集客', '文字列__1行_ONE入会有無_0', '全額決済完了日'
+    ];
     return fetchAllRecords(APP29_ID, query, fields);
   }
 
@@ -192,16 +213,25 @@
 
   /**
    * Step 4: 集客者×請求先でユニーク集計（App 15に登録済みの集客者のみ）
+   * なまいきスクール生は「株式会社リード（なまいきくん）」にまとめる
    */
   function aggregate(salesRecords, refundRecords, collectorInfo) {
     var result = {};
+    var namaikiCollectorNames = {};
 
     salesRecords.forEach(function (rec) {
-      var collector = ((rec['集客者_ルックアップ'] || {}).value || '').trim();
+      var originalCollector = ((rec['集客者_ルックアップ'] || {}).value || '').trim();
       var product = (rec['ドロップダウン_商品の種類'] || {}).value || '';
       var company = PRODUCT_TO_COMPANY[product];
-      if (!collector || !company) return;
-      if (!collectorInfo[collector]) return; // App 15未登録 → スキップ
+      if (!originalCollector || !company) return;
+      if (!collectorInfo[originalCollector]) return;
+
+      var collector = originalCollector;
+      var completionDate = ((rec['全額決済完了日'] || {}).value || '');
+      if (isNamaikiPayout(rec) && completionDate >= NAMAIKI_CUTOFF) {
+        collector = NAMAIKI_COLLECTOR;
+        namaikiCollectorNames[originalCollector] = true;
+      }
 
       var key = collector + '|||' + company;
       if (!result[key]) result[key] = { collector: collector, company: company, sales: 0, refunds: 0 };
@@ -209,11 +239,16 @@
     });
 
     refundRecords.forEach(function (rec) {
-      var collector = ((rec['文字列__1行_集客者'] || {}).value || '').trim();
+      var originalCollector = ((rec['文字列__1行_集客者'] || {}).value || '').trim();
       var product = (rec['文字列__1行_商品の種類'] || {}).value || '';
       var company = PRODUCT_TO_COMPANY[product];
-      if (!collector || !company) return;
-      if (!collectorInfo[collector]) return;
+      if (!originalCollector || !company) return;
+      if (!collectorInfo[originalCollector]) return;
+
+      var collector = originalCollector;
+      if (namaikiCollectorNames[originalCollector]) {
+        collector = NAMAIKI_COLLECTOR;
+      }
 
       var key = collector + '|||' + company;
       if (!result[key]) result[key] = { collector: collector, company: company, sales: 0, refunds: 0 };
@@ -407,7 +442,8 @@
       'ルックアップ_購入商品', '計算_集客フィー税抜', '全額決済完了日',
       '生徒名_苗字', '生徒名_名前', '生徒LINE名',
       '計算_卸プレゼント5万円着金額_計算用', '決済額_振込', '決済額_クレカ', '決済額_信販',
-      'ルックアップ_登録経路_自社広告・自社SNS_0'
+      'ルックアップ_登録経路_自社広告・自社SNS_0',
+      '報酬ランク_集客', '文字列__1行_ONE入会有無_0'
     ];
     return fetchAllRecords(APP29_ID, query, fields);
   }
@@ -448,18 +484,35 @@
 
   /**
    * collector×company でフィルタしてサブテーブル行を構築
+   * namaikiCollectors: なまいきくん対象の個別集客者名Set（重複防止用）
    */
-  function buildSubtableRows(collector, company, sales, refunds) {
+  function buildSubtableRows(collector, company, sales, refunds, namaikiCollectors) {
     var targetType = COMPANY_TO_PRODUCT[company];
     if (!targetType) return [];
 
+    var isNamaikiEntry = (collector === NAMAIKI_COLLECTOR);
     var rows = [];
 
     // 売上行
     sales.forEach(function (r) {
       var rCollector = ((r['集客者_ルックアップ'] || {}).value || '').trim();
       var rType = (r['ドロップダウン_商品の種類'] || {}).value || '';
-      if (rCollector !== collector || rType !== targetType) return;
+      if (rType !== targetType) return;
+
+      if (isNamaikiEntry) {
+        // なまいきくんまとめ: isNamaikiPayout かつ cutoff以降の売上のみ
+        if (!isNamaikiPayout(r)) return;
+        var completionDate = ((r['全額決済完了日'] || {}).value || '');
+        if (completionDate < NAMAIKI_CUTOFF) return;
+      } else {
+        // 通常の集客者
+        if (rCollector !== collector) return;
+        // なまいきくんに振り替え済みの売上は除外
+        if (namaikiCollectors[rCollector] && isNamaikiPayout(r)) {
+          var cd = ((r['全額決済完了日'] || {}).value || '');
+          if (cd >= NAMAIKI_CUTOFF) return;
+        }
+      }
 
       rows.push({
         value: {
@@ -475,7 +528,8 @@
           '数値_決済額_クレカ': { type: 'NUMBER', value: (r['決済額_クレカ'] || {}).value || 0 },
           '数値_決済額_信販': { type: 'NUMBER', value: (r['決済額_信販'] || {}).value || 0 },
           '文字列__1行_今回成約の登録経路': { type: 'SINGLE_LINE_TEXT', value: (r['ルックアップ_登録経路_自社広告・自社SNS_0'] || {}).value || '' },
-          '文字列__1行_レコード番号': { type: 'SINGLE_LINE_TEXT', value: 'sales-' + r['$id'].value }
+          '文字列__1行_レコード番号': { type: 'SINGLE_LINE_TEXT', value: 'sales-' + r['$id'].value },
+          '文字列__1行_集客者名': { type: 'SINGLE_LINE_TEXT', value: rCollector }
         }
       });
     });
@@ -484,7 +538,17 @@
     refunds.forEach(function (r) {
       var rCollector = ((r['文字列__1行_集客者'] || {}).value || '').trim();
       var rType = (r['文字列__1行_商品の種類'] || {}).value || '';
-      if (rCollector !== collector || rType !== targetType) return;
+      if (rType !== targetType) return;
+
+      if (isNamaikiEntry) {
+        // なまいきくんまとめ: namaikiCollectorsに含まれる集客者の返金のみ
+        if (!namaikiCollectors[rCollector]) return;
+      } else {
+        // 通常の集客者
+        if (rCollector !== collector) return;
+        // namaikiCollectorsに含まれる場合は除外（なまいきくん側に集約）
+        if (namaikiCollectors[rCollector]) return;
+      }
 
       var amount = Number((r['gatherer_offset_final'] || {}).value) || 0;
       var minusAmount = amount * -1;
@@ -503,7 +567,8 @@
           '数値_決済額_クレカ': { type: 'NUMBER', value: 0 },
           '数値_決済額_信販': { type: 'NUMBER', value: 0 },
           '文字列__1行_今回成約の登録経路': { type: 'SINGLE_LINE_TEXT', value: '' },
-          '文字列__1行_レコード番号': { type: 'SINGLE_LINE_TEXT', value: 'refund-' + r['$id'].value }
+          '文字列__1行_レコード番号': { type: 'SINGLE_LINE_TEXT', value: 'refund-' + r['$id'].value },
+          '文字列__1行_集客者名': { type: 'SINGLE_LINE_TEXT', value: rCollector }
         }
       });
     });
@@ -548,6 +613,16 @@
     var period = calculatePeriod(today);
     var targetMonth = getPreviousMonth();
 
+    // 売上データからなまいきくん対象の集客者名Setを構築
+    var namaikiCollectors = {};
+    sales.forEach(function (r) {
+      var rCollector = ((r['集客者_ルックアップ'] || {}).value || '').trim();
+      var completionDate = ((r['全額決済完了日'] || {}).value || '');
+      if (isNamaikiPayout(r) && completionDate >= NAMAIKI_CUTOFF) {
+        namaikiCollectors[rCollector] = true;
+      }
+    });
+
     var results = [];
 
     app44Records.forEach(function (rec44) {
@@ -555,7 +630,7 @@
       var company = (rec44['billing_company'] || {}).value || '';
       var recNo = (rec44['レコード番号'] || {}).value || rec44['$id'].value;
 
-      var subtableRows = buildSubtableRows(collector, company, sales, refunds);
+      var subtableRows = buildSubtableRows(collector, company, sales, refunds, namaikiCollectors);
       if (subtableRows.length === 0) return; // サブテーブル0件はスキップ
 
       // 請求番号: GF-YYYYMM-{App44レコード番号}
@@ -565,6 +640,17 @@
       var info = collectorInfo[collector] || {};
       var invoiceNumber = info.invoiceNumber || '';
 
+      // レポトン型の自動判定
+      var hasInvoice = info.hasInvoice === 'あり';
+      var hasRefund = subtableRows.some(function (row) {
+        return Number(row.value.sub_amount.value) < 0;
+      });
+      var companyLabel = company === '株式会社AI ONE' ? 'AI ONE' : '物販ONE';
+      var repotonType = companyLabel + ' インボイス' + (hasInvoice ? 'あり' : 'なし');
+      if (hasRefund) {
+        repotonType += ' 返金あり';
+      }
+
       var app36Data = {
         'ルックアップ_集客者': { value: collector },
         billing_company: { value: company },
@@ -572,6 +658,7 @@
         '請求番号': { value: invoiceNo },
         '文字列__1行_集計期間': { value: period },
         '文字列__1行_インボイス番号': { value: invoiceNumber },
+        repoton_type: { value: repotonType },
         'テーブル_details_table': { value: subtableRows }
       };
 
